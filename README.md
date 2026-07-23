@@ -1,6 +1,9 @@
-# Polyhelm
-
-A Dynamic Island for your coding agents. Native Swift, macOS, no Electron.
+<div align="center">
+  <img src="AppIcon/polyhelm-1024.png" alt="Polyhelm" width="160" height="160">
+  <h1>Polyhelm</h1>
+  <p><strong>One helm for every agent.</strong></p>
+  <p>A Dynamic Island for your coding agents.<br>Native Swift, macOS, no Electron.</p>
+</div>
 
 Collapsed, it's a black bar hugging the notch showing a dot per running session.
 Hover and it drops into a panel where you can see what every agent is doing,
