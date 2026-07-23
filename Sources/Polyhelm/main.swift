@@ -123,10 +123,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard waiting != renderedWaiting else { return }
         renderedWaiting = waiting
 
-        let symbol = waiting > 0 ? "exclamationmark.bubble.fill" : "rectangle.topthird.inset.filled"
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Polyhelm")
-        button.image?.isTemplate = true
+        button.image = Self.statusImage(waiting: waiting > 0)
         button.title = waiting > 0 ? " \(waiting)" : ""
+    }
+
+    /// The Polyhelm mark as a menu-bar template: a rounded pill with three dots,
+    /// the centre one larger to echo the app icon. Template (black + alpha) so the
+    /// system tints it for light/dark menu bars. Idle draws an outline with solid
+    /// dots; waiting fills the pill and knocks the dots out so attention reads fast.
+    private static func statusImage(waiting: Bool) -> NSImage {
+        let w: CGFloat = 34, h: CGFloat = 15, lw: CGFloat = 1.5
+        let img = NSImage(size: NSSize(width: w, height: h), flipped: false) { _ in
+            let pillRect = NSRect(x: lw / 2, y: lw / 2, width: w - lw, height: h - lw)
+            let radius = pillRect.height / 2
+            let pill = NSBezierPath(roundedRect: pillRect, xRadius: radius, yRadius: radius)
+            let cy = h / 2
+            // (x-fraction, radius) — centre dot larger, like the icon.
+            let dots: [(CGFloat, CGFloat)] = [(0.30, 1.7), (0.50, 2.4), (0.70, 1.7)]
+            func dotPath(_ fx: CGFloat, _ r: CGFloat) -> NSBezierPath {
+                NSBezierPath(ovalIn: NSRect(x: fx * w - r, y: cy - r, width: r * 2, height: r * 2))
+            }
+            NSColor.black.set()
+            if waiting {
+                pill.windingRule = .evenOdd
+                for (fx, r) in dots { pill.append(dotPath(fx, r)) }
+                pill.fill()
+            } else {
+                pill.lineWidth = lw
+                pill.stroke()
+                for (fx, r) in dots { dotPath(fx, r).fill() }
+            }
+            return true
+        }
+        img.isTemplate = true
+        img.accessibilityDescription = "Polyhelm"
+        return img
     }
 
     // MARK: - Actions
