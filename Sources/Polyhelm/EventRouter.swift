@@ -54,16 +54,6 @@ struct EventRouter {
                     return row
                 }
             ]))
-        case "/debug":
-            // Introspection for interaction bugs. `?expand=make|activate` forces the
-            // panel open with a focus strategy and reports whether it took key.
-            if let strategy = request.query["expand"] {
-                respond(HTTPResponse(status: 200,
-                                     json: NotchWindowController.shared?.debugForceExpand(strategy: strategy) ?? [:]))
-            } else {
-                respond(HTTPResponse(status: 200,
-                                     json: NotchWindowController.shared?.debugSnapshot() ?? [:]))
-            }
         case "/event":
             handleEvent(request.json)
             respond(.ok)
