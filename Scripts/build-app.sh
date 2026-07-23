@@ -18,6 +18,11 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Polyhelm"
 
+# App icon (see AppIcon/make_icon.py to regenerate the artwork + .icns).
+if [ -f AppIcon/Polyhelm.icns ]; then
+  cp AppIcon/Polyhelm.icns "$APP/Contents/Resources/Polyhelm.icns"
+fi
+
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -27,6 +32,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleDisplayName</key><string>Polyhelm</string>
   <key>CFBundleIdentifier</key><string>app.polyhelm.Polyhelm</string>
   <key>CFBundleExecutable</key><string>Polyhelm</string>
+  <key>CFBundleIconFile</key><string>Polyhelm</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0.0</string>
   <key>CFBundleVersion</key><string>1</string>
