@@ -10,6 +10,24 @@ Hover and it drops into a panel where you can see what every agent is doing,
 approve or deny tool calls without leaving your editor, and click a session to
 jump to the exact terminal tab it's running in.
 
+## Install
+
+Apple Silicon, macOS 14+. Homebrew:
+
+```bash
+brew install --cask miracseref/polyhelm/polyhelm
+```
+
+Or the one-line installer:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/miracseref/Polyhelm/main/install.sh | bash
+```
+
+Both pull the latest [release](https://github.com/miracseref/Polyhelm/releases).
+Because the build is not yet Developer ID notarized, each de-quarantines the app
+so Gatekeeper opens it without a prompt; once it's notarized that step drops away.
+
 ## Sharing it
 
 ```bash
@@ -425,3 +443,7 @@ is only written once you decide.
 `Chiptune` renders each cue to a PCM buffer off the audio thread and replays it
 through an `AVAudioPlayerNode` — nothing locks or allocates inside the render
 callback, which is the rule for real-time audio.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
