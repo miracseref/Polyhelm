@@ -58,9 +58,26 @@ else
   echo "==> no bundled logos (Logos/ is empty — runtime discovery + drawn fallbacks)"
 fi
 
-# Ad-hoc signature: enough for local use and for TCC to remember grants by path.
-codesign --force --deep --sign - "$APP" 2>/dev/null || \
-  echo "    (codesign skipped — app still runs locally)"
+# Sign with a stable identity when one is available, so macOS keeps grants
+# (TCC automation, and the Keychain "Always Allow" for the Claude Code token)
+# across rebuilds — an ad-hoc signature changes every build and re-prompts.
+# Override with POLYHELM_SIGN_IDENTITY; otherwise the first codesigning identity
+# in the login keychain is used, falling back to ad-hoc.
+IDENTITY="${POLYHELM_SIGN_IDENTITY:-}"
+if [ -z "$IDENTITY" ]; then
+  IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | sed -n 's/.*"\(.*\)".*/\1/p' | head -1)"
+fi
+if [ -n "$IDENTITY" ]; then
+  echo "==> signing as: $IDENTITY"
+  codesign --force --deep --sign "$IDENTITY" "$APP" || {
+    echo "    (identity sign failed — falling back to ad-hoc)"
+    codesign --force --deep --sign - "$APP" 2>/dev/null || true
+  }
+else
+  echo "==> ad-hoc signing (no codesigning identity found)"
+  codesign --force --deep --sign - "$APP" 2>/dev/null || \
+    echo "    (codesign skipped — app still runs locally)"
+fi
 
 echo "==> built $APP"
 
