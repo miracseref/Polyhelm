@@ -2,3 +2,5 @@
 build/
 .DS_Store
 inventaire-projets.md
+# Separate repo (miracseref/homebrew-polyhelm) checked out here for convenience
+homebrew-tap/

@@ -19,6 +19,13 @@ struct NotchView: View {
     /// Pending collapse, cancelled if the pointer comes back. Without this the
     /// panel flaps every time the mouse crosses the top of the screen.
     @State private var collapseTask: Task<Void, Never>?
+    /// Pending open, cancelled if the pointer leaves before the dwell elapses.
+    /// The island straddles the menu-bar band and, when agents run, spreads wings
+    /// out to either side of the notch — right where browser tabs and menu items
+    /// live. Opening the instant the pointer touches that band made the panel
+    /// ambush anything the user was reaching for up top. Requiring a brief dwell
+    /// means a sweep *past* the notch no longer springs it open; only lingering does.
+    @State private var openTask: Task<Void, Never>?
 
     private var expanded: Bool { store.isExpanded }
 
@@ -81,7 +88,7 @@ struct NotchView: View {
         )
         .onHover { inside in
             hovering = inside
-            inside ? open() : scheduleCollapse()
+            inside ? scheduleOpen() : scheduleCollapse()
         }
         .background(
             // ⎋ collapses, unless an approval card is using it for Deny.
@@ -322,15 +329,25 @@ struct NotchView: View {
 
     // MARK: - Open / collapse
 
-    private func open() {
+    /// Open only after the pointer dwells over the island, so aiming for a browser
+    /// tab or menu-bar item beside the notch doesn't fling the panel open in
+    /// passing. Cancelled the moment the pointer leaves (`scheduleCollapse`).
+    private func scheduleOpen() {
         collapseTask?.cancel()
         guard !expanded else { return }
-        NotchWindowController.shared?.setExpanded(true)
+        openTask?.cancel()
+        openTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(280))
+            guard !Task.isCancelled, hovering, !expanded else { return }
+            NotchWindowController.shared?.setExpanded(true)
+        }
     }
 
     /// Collapse after a grace period, so brushing past the notch or crossing a
     /// gap between subviews doesn't slam the panel shut.
     private func scheduleCollapse() {
+        // A pending open is now stale — the pointer left before it fired.
+        openTask?.cancel()
         collapseTask?.cancel()
         collapseTask = Task { @MainActor in
             try? await Task.sleep(for: .milliseconds(420))
