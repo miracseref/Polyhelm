@@ -8,6 +8,8 @@ cd "$(dirname "$0")/.."
 
 CONFIG="${1:-debug}"
 APP="build/Polyhelm.app"
+# Release tooling stamps the version via POLYHELM_VERSION; local builds default.
+VERSION="${POLYHELM_VERSION:-1.0.0}"
 
 echo "==> swift build ($CONFIG)"
 swift build -c "$CONFIG" --arch arm64
@@ -23,7 +25,7 @@ if [ -f AppIcon/Polyhelm.icns ]; then
   cp AppIcon/Polyhelm.icns "$APP/Contents/Resources/Polyhelm.icns"
 fi
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -34,7 +36,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleExecutable</key><string>Polyhelm</string>
   <key>CFBundleIconFile</key><string>Polyhelm</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>1.0.0</string>
+  <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundleVersion</key><string>1</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <!-- Accessory app: lives in the notch and the menu bar, never the Dock. -->
