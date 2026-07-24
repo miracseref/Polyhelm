@@ -73,11 +73,13 @@ struct UsageChip: View {
 }
 
 enum UsageTint {
+    /// Claude Code's own usage palette: blue while there's headroom, amber as the
+    /// window fills, red near the ceiling.
     static func of(_ percent: Double) -> Color {
         switch percent {
-        case ..<60:  return SessionState.done.tint
-        case ..<85:  return SessionState.needsInput.tint
-        default:     return SessionState.error.tint
+        case ..<60:  return Color(red: 0.29, green: 0.56, blue: 0.95)   // blue
+        case ..<85:  return Color(red: 0.95, green: 0.66, blue: 0.15)   // amber
+        default:     return Color(red: 0.90, green: 0.30, blue: 0.24)   // red
         }
     }
 }
@@ -156,6 +158,7 @@ struct UsagePanel: View {
     private func indicator(for report: UsageReport) -> Color {
         if let quota = report.quota { return UsageTint.of(quota.usedPercent) }
         if report.measured != nil { return .white.opacity(0.5) }
+        if report.activity != nil { return .white.opacity(0.35) }
         return .white.opacity(0.18)
     }
 
@@ -183,6 +186,14 @@ struct UsagePanel: View {
                 measuredBlock(measured, hasQuota: report.quota != nil)
             }
 
+            if let activity = report.activity {
+                activityBlock(activity)
+            }
+
+            if let week = report.week {
+                weekBlock(week)
+            }
+
             if let note = report.note {
                 Label(note, systemImage: "info.circle")
                     .font(.system(size: 10.5))
@@ -201,27 +212,60 @@ struct UsagePanel: View {
 
     // MARK: - Blocks
 
+    /// One row per enforced window, laid out like Claude Code's own `/usage`:
+    /// name + reset on the left, the bar filling the middle, "X% used" at the right.
     private func quotaBlock(_ quota: UsageReport.Quota) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
-            bar(quota.usedPercent)
-            HStack(spacing: 0) {
-                Text("\(Int(quota.usedPercent))% of your \(quota.windowLabel)")
-                    .font(.system(size: 11, weight: .medium))
-                Spacer()
-                if let resets = quota.resetsAt {
-                    Text("resets in \(UsageChip.countdown(to: resets, from: now))")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.white.opacity(0.5))
+        VStack(alignment: .leading, spacing: 14) {
+            ForEach(quota.windows) { window in
+                HStack(spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(title(for: window))
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.92))
+                        if let resets = window.resetsAt {
+                            Text(resetLabel(resets, minutes: window.windowMinutes))
+                                .font(.system(size: 10))
+                                .foregroundStyle(.white.opacity(0.45))
+                                .lineLimit(1)
+                                .fixedSize()
+                        }
+                    }
+                    .frame(width: 116, alignment: .leading)
+
+                    bar(window.usedPercent)
+
+                    Text("\(Int(window.usedPercent))% used")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.7))
+                        .frame(width: 58, alignment: .trailing)
                 }
             }
-            if let second = quota.secondaryPercent, let minutes = quota.secondaryWindowMinutes {
-                let label = UsageReport.Quota(usedPercent: second,
-                                              windowMinutes: minutes).windowLabel
-                bar(second)
-                Text("\(Int(second))% of your \(label)")
-                    .font(.system(size: 11, weight: .medium))
-            }
         }
+    }
+
+    private func title(for window: UsageReport.Quota.Window) -> String {
+        if !window.name.isEmpty { return window.name }
+        // Codex windows carry no name — title them by length.
+        switch window.windowMinutes {
+        case 10080:      return "Weekly"
+        case 1..<1440:   return "Current session"
+        default:
+            let label = UsageReport.Quota.windowLabel(minutes: window.windowMinutes)
+            return label.isEmpty ? "Limit" : "Rolling \(label)"
+        }
+    }
+
+    /// Short windows count down ("Resets in 4 hr 35 min"); weekly ones name the
+    /// day and time ("Resets Mon 4:00 PM") — matching how `/usage` phrases each.
+    private func resetLabel(_ date: Date, minutes: Int) -> String {
+        if minutes > 0 && minutes < 1440 {
+            let remaining = max(0, Int(date.timeIntervalSince(now)))
+            let hours = remaining / 3600, mins = (remaining % 3600) / 60
+            return hours > 0 ? "Resets in \(hours) hr \(mins) min" : "Resets in \(mins) min"
+        }
+        let day = date.formatted(.dateTime.weekday(.abbreviated))
+        let time = date.formatted(date: .omitted, time: .shortened)
+        return "Resets \(day) \(time)"
     }
 
     private func measuredBlock(_ measured: UsageReport.Measured, hasQuota: Bool) -> some View {
@@ -240,7 +284,12 @@ struct UsagePanel: View {
             if let resets = measured.resetsAt {
                 row("5h block resets", resets.formatted(date: .omitted, time: .shortened))
             }
-            if !measured.models.isEmpty {
+            if !measured.tokensByModel.isEmpty {
+                // A row per model, heaviest first — more useful than a joined list.
+                ForEach(measured.tokensByModel.sorted { $0.value > $1.value }, id: \.key) { model, tokens in
+                    row(model.replacingOccurrences(of: "claude-", with: ""), tokens.compactTokens)
+                }
+            } else if !measured.models.isEmpty {
                 row("Models", measured.models.sorted()
                     .map { $0.replacingOccurrences(of: "claude-", with: "") }
                     .joined(separator: ", "))
@@ -248,12 +297,35 @@ struct UsagePanel: View {
         }
     }
 
+    private func activityBlock(_ activity: UsageReport.Activity) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            row(activity.noun.capitalized, "\(activity.count)")
+            if let last = activity.lastActive {
+                row("Last active", last.formatted(.relative(presentation: .named)))
+            }
+        }
+    }
+
+    private func weekBlock(_ week: UsageReport.Week) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Divider().overlay(Color.white.opacity(0.08)).padding(.vertical, 2)
+            Text("Last 7 days")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.5))
+            row("Tokens", week.tokens.compactTokens)
+            row("Messages", "\(week.messages)")
+        }
+    }
+
     private func bar(_ percent: Double) -> some View {
-        GeometryReader { proxy in
+        let tint = UsageTint.of(percent)
+        // Track is a dim wash of the same hue, so an amber bar sits in a brown
+        // channel and a blue one in a navy channel — exactly like the image.
+        return GeometryReader { proxy in
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.white.opacity(0.14))
+                Capsule().fill(tint.opacity(0.22))
                 Capsule()
-                    .fill(UsageTint.of(percent))
+                    .fill(tint)
                     .frame(width: max(4, proxy.size.width * min(percent, 100) / 100))
             }
         }
@@ -276,12 +348,16 @@ struct UsagePanel: View {
     /// token count are not the same kind of fact.
     private func source(for report: UsageReport) -> String {
         if report.quota != nil {
-            return "Percentages are what \(report.brand.displayName)'s server reported, "
-                + "read from its own session logs."
+            return "Percentages are live from \(report.brand.displayName)'s servers — "
+                + "a real fraction of a real limit."
         }
         if report.measured != nil {
             return "Counted from local transcripts. This is what you spent — the "
                 + "ceiling is only known server-side, so no percentage is shown."
+        }
+        if report.activity != nil {
+            return "Inferred from file timestamps — \(report.brand.displayName)'s logs "
+                + "don't store readable token counts."
         }
         return "\(report.brand.displayName) is installed but keeps no usage data "
             + "Polyhelm can read."

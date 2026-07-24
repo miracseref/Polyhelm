@@ -17,6 +17,7 @@ final class UsageTracker: ObservableObject {
         var cacheReadTokens: Int
         var outputTokens: Int
         var models: Set<String>
+        var tokensByModel: [String: Int]
 
         /// Cache reads are an order of magnitude cheaper, so the headline number
         /// leaves them out — counting them would wildly overstate consumption.
@@ -35,12 +36,16 @@ final class UsageTracker: ObservableObject {
     /// instead of silently omitting them.
     private let providers: [any UsageProvider] = [
         CodexUsageProvider(),
-        OpaqueUsageProvider(brand: .gemini, probePath: ".gemini",
-                            reason: "No session logs on disk"),
-        OpaqueUsageProvider(brand: .cursor, probePath: ".cursor/chats",
-                            reason: "Chats are SQLite with no usage fields"),
-        OpaqueUsageProvider(brand: .opencode, probePath: ".config/opencode",
-                            reason: "No session logs on disk")
+        OpenCodeUsageProvider(),
+        ActivityUsageProvider(
+            brand: .gemini, probePath: ".gemini", noun: "conversations",
+            counters: [.filesWithExtension(subpath: ".gemini/antigravity/conversations", ext: "pb"),
+                       .filesNamed(subpath: ".gemini/tmp", name: "logs.json")],
+            reason: "Antigravity stores conversations as protobuf — no readable token counts."),
+        ActivityUsageProvider(
+            brand: .cursor, probePath: ".cursor/chats", noun: "chats",
+            counters: [.filesNamed(subpath: ".cursor/chats", name: "store.db")],
+            reason: "Cursor chats are SQLite blobs with no usage fields.")
     ]
 
     /// Anthropic's usage window is 5 hours from your first message in it.
@@ -52,6 +57,8 @@ final class UsageTracker: ObservableObject {
     private var isScanning = false
     /// Parsed samples per transcript, keyed by path. Only ever touched on `queue`.
     private let cache = TranscriptCache()
+    /// Fetches Claude Code's real server quota. Only ever touched on `queue`.
+    private let claudeQuota = ClaudeQuotaReader()
 
     init() {
         refresh()
@@ -75,6 +82,7 @@ final class UsageTracker: ObservableObject {
             let samples = Self.scan(since: cutoff, cache: self.cache)
             let blocks = Self.group(samples, blockLength: blockLength)
             let weekTotal = samples.reduce(0) { $0 + $1.input + $1.output }
+            let quota = self.claudeQuota.fetch()
             let others = providers.compactMap { $0.read(since: cutoff) }
 
             Task { @MainActor in
@@ -84,29 +92,44 @@ final class UsageTracker: ObservableObject {
                 self.weekMessages = samples.count
                 self.lastRefreshed = Date()
                 self.reports = self.claudeReport(blocks: blocks, weekTotal: weekTotal,
-                                                 weekMessages: samples.count) + others
+                                                 weekMessages: samples.count, quota: quota) + others
                 self.isScanning = false
             }
         }
     }
 
-    /// Claude Code exposes no server quota locally, so it only ever reports
-    /// measured spend — never a percentage it cannot know.
-    private func claudeReport(blocks: [Block], weekTotal: Int, weekMessages: Int) -> [UsageReport] {
-        guard let block = blocks.last, block.resetsAt > Date() else {
-            return [UsageReport(brand: .claudeCode,
-                                note: "No messages in the last 5 hours")]
+    /// Claude Code now reports a real server quota when its OAuth token can be
+    /// read, alongside the locally-measured 5-hour block and 7-day rollup. Any of
+    /// the three may be absent — quota if offline/signed-out, measured if idle.
+    private func claudeReport(blocks: [Block], weekTotal: Int, weekMessages: Int,
+                              quota outcome: ClaudeQuotaReader.Outcome) -> [UsageReport] {
+        // 7-day rollup rides along with the live figure, when there's anything to show.
+        let week = weekMessages > 0 ? UsageReport.Week(tokens: weekTotal, messages: weekMessages) : nil
+        let measured: UsageReport.Measured? = blocks.last.flatMap { block in
+            block.resetsAt > Date()
+                ? UsageReport.Measured(messages: block.messages,
+                                       inputTokens: block.inputTokens,
+                                       cacheReadTokens: block.cacheReadTokens,
+                                       outputTokens: block.outputTokens,
+                                       resetsAt: block.resetsAt,
+                                       models: block.models,
+                                       tokensByModel: block.tokensByModel)
+                : nil
         }
-        return [UsageReport(
-            brand: .claudeCode,
-            quota: nil,
-            measured: UsageReport.Measured(messages: block.messages,
-                                           inputTokens: block.inputTokens,
-                                           cacheReadTokens: block.cacheReadTokens,
-                                           outputTokens: block.outputTokens,
-                                           resetsAt: block.resetsAt,
-                                           models: block.models)
-        )]
+
+        var quota: UsageReport.Quota?
+        var note: String?
+        switch outcome {
+        case .ok(let value): quota = value
+        case .stale:         note = "Claude Code's saved token has expired — run `claude` to refresh the quota."
+        case .none:          break
+        }
+        // Only call it empty when there's genuinely nothing to show.
+        if quota == nil && measured == nil && note == nil {
+            note = "No messages in the last 5 hours"
+        }
+        return [UsageReport(brand: .claudeCode, quota: quota, measured: measured,
+                            week: week, note: note)]
     }
 
     // MARK: - Scanning
@@ -188,6 +211,7 @@ final class UsageTracker: ObservableObject {
                 open.cacheReadTokens += sample.cacheRead
                 open.outputTokens += sample.output
                 open.models.insert(sample.model)
+                open.tokensByModel[sample.model, default: 0] += sample.input + sample.output
                 blocks[blocks.count - 1] = open
             } else {
                 blocks.append(Block(startedAt: sample.at,
@@ -196,7 +220,8 @@ final class UsageTracker: ObservableObject {
                                     inputTokens: sample.input,
                                     cacheReadTokens: sample.cacheRead,
                                     outputTokens: sample.output,
-                                    models: [sample.model]))
+                                    models: [sample.model],
+                                    tokensByModel: [sample.model: sample.input + sample.output]))
             }
         }
         return blocks
